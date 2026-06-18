@@ -115,13 +115,18 @@ export default function App() {
         }
       )
 
+      if (res.status === 429) throw new Error('RATE_LIMIT')
       const data = await res.json()
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
       const clean = text.replace(/```json|```/g, '').trim()
       const parsed = JSON.parse(clean)
       setResult(parsed)
     } catch (e) {
-      setError('Analysis failed. Please try again or use a different file.')
+      if (e.message === 'RATE_LIMIT') {
+        setError('Free tier limit reached. Please wait 1 minute and try again.')
+      } else {
+        setError('Analysis failed. Please try again or use a different file.')
+      }
       console.error(e)
     } finally {
       setLoading(false); setPhase('')
