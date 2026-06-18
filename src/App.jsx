@@ -93,27 +93,30 @@ export default function App() {
       const extracted = await extractText(file)
       setPhase('Analyzing with AI…')
 
-      let messages
+      const apiKey = import.meta.env.VITE_GEMINI_KEY
+      if (!apiKey) throw new Error('No API key configured')
+
+      let parts
       if (isPdf) {
-        messages = [{
-          role: 'user',
-          content: [
-            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: extracted } },
-            { type: 'text', text: PROMPT }
-          ]
-        }]
+        parts = [
+          { inlineData: { mimeType: 'application/pdf', data: extracted } },
+          { text: PROMPT }
+        ]
       } else {
-        messages = [{ role: 'user', content: `${PROMPT}\n\n---RESUME TEXT---\n${extracted}` }]
+        parts = [{ text: `${PROMPT}\n\n---RESUME TEXT---\n${extracted}` }]
       }
 
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1000, messages })
-      })
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts }] })
+        }
+      )
 
       const data = await res.json()
-      const text = data.content?.map(b => b.text || '').join('')
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
       const clean = text.replace(/```json|```/g, '').trim()
       const parsed = JSON.parse(clean)
       setResult(parsed)
