@@ -94,7 +94,7 @@ export default function App() {
       setPhase('Analyzing with AI…')
 
       const apiKey = import.meta.env.VITE_GEMINI_KEY
-      if (!apiKey) throw new Error('No API key configured')
+      if (!apiKey) throw new Error('NO_API_KEY')
 
       let parts
       if (isPdf) {
@@ -106,28 +106,74 @@ export default function App() {
         parts = [{ text: `${PROMPT}\n\n---RESUME TEXT---\n${extracted}` }]
       }
 
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts }] })
-        }
-      )
+      // Try gemini-2.0-flash first, fall back to gemini-1.5-flash
+      const models = ['gemini-2.0-flash', 'gemini-1.5-flash']
+      let data = null
+      let lastError = null
 
-      if (res.status === 429) throw new Error('RATE_LIMIT')
-      const data = await res.json()
+      for (const model of models) {
+        setPhase(`Analyzing with AI (${model})…`)
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts }] })
+          }
+        )
+
+        const json = await res.json()
+
+        if (!res.ok) {
+          const status = res.status
+          const apiMsg = json?.error?.message || ''
+          console.warn(`Model ${model} failed [${status}]:`, apiMsg)
+
+          if (status === 429) { lastError = 'RATE_LIMIT'; continue }
+          if (status === 400 && apiMsg.toLowerCase().includes('quota')) { lastError = 'QUOTA'; continue }
+          if (status === 403) { lastError = 'FORBIDDEN'; continue }
+          if (status === 401) { lastError = 'INVALID_KEY'; break }
+          // For quota/billing errors (often 429 with specific message)
+          if (apiMsg.toLowerCase().includes('quota') || apiMsg.toLowerCase().includes('billing') || apiMsg.toLowerCase().includes('exhausted')) {
+            lastError = 'QUOTA'; continue
+          }
+          lastError = `API_ERROR:${status}:${apiMsg}`
+          continue
+        }
+
+        data = json
+        break
+      }
+
+      if (!data) {
+        throw new Error(lastError || 'ALL_MODELS_FAILED')
+      }
+
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+      if (!text) throw new Error('EMPTY_RESPONSE')
+
       const clean = text.replace(/```json|```/g, '').trim()
       const parsed = JSON.parse(clean)
       setResult(parsed)
     } catch (e) {
-      if (e.message === 'RATE_LIMIT') {
-        setError('Free tier limit reached. Please wait 1 minute and try again.')
+      const msg = e.message || ''
+      if (msg === 'NO_API_KEY') {
+        setError('❌ No API key configured. Add VITE_GEMINI_KEY to your Vercel environment variables.')
+      } else if (msg === 'INVALID_KEY') {
+        setError('❌ Invalid API key. Please update your VITE_GEMINI_KEY in Vercel settings.')
+      } else if (msg === 'QUOTA' || msg.includes('quota') || msg.includes('billing') || msg.includes('exhausted')) {
+        setError('❌ Gemini API quota exceeded or billing issue. Please get a new API key from aistudio.google.com and update it in Vercel.')
+      } else if (msg === 'RATE_LIMIT') {
+        setError('⏳ Rate limit reached on all models. Please wait a minute and try again.')
+      } else if (msg === 'EMPTY_RESPONSE') {
+        setError('⚠ AI returned an empty response. Please try again.')
+      } else if (msg.startsWith('API_ERROR')) {
+        const [, status, apiMsg] = msg.split(':')
+        setError(`❌ API Error ${status}: ${apiMsg || 'Unknown error'}. Please check your API key.`)
       } else {
-        setError('Analysis failed. Please try again or use a different file.')
+        setError(`❌ Analysis failed: ${msg || 'Unknown error'}. Please try again.`)
       }
-      console.error(e)
+      console.error('[ResumeAI Error]', e)
     } finally {
       setLoading(false); setPhase('')
     }
