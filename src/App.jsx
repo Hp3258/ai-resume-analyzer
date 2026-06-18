@@ -106,8 +106,8 @@ export default function App() {
         parts = [{ text: `${PROMPT}\n\n---RESUME TEXT---\n${extracted}` }]
       }
 
-      // Try gemini-2.0-flash first, fall back to gemini-1.5-flash
-      const models = ['gemini-2.0-flash', 'gemini-1.5-flash']
+      // Try available modern models
+      const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest']
       let data = null
       let lastError = null
 
